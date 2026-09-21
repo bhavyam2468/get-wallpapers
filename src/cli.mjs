@@ -2,17 +2,13 @@
 // wallgrab — bulk wallpaper downloader with an inline sentence editor.
 
 import process from 'node:process';
-import readline from 'node:readline';
 import { banner, rule, box, SPINNER, THEME } from './banner.mjs';
-import { c, clearLine, cursorUp, hideCursor, showCursor, bar, supportsTrueColor, gradient } from './ansi.mjs';
+import { c, CYAN, AMBER, clearLine, cursorUp, hideCursor, showCursor, bar, supportsTrueColor, gradient } from './ansi.mjs';
 import { SentenceEditor } from './tokens.mjs';
 import { SOURCES, byId } from './sources.mjs';
 import { downloadAll, humanBytes, humanTime } from './download.mjs';
 
 const VERSION = '1.0.0';
-const CYAN = supportsTrueColor() ? '\x1b[38;2;0;198;255m' : c.cyan;
-const AMBER = supportsTrueColor() ? '\x1b[38;2;255;195;113m' : c.yellow;
-
 // ─────────────────────────────────────────────────────────────── arg parsing
 
 function parseArgs(argv) {
@@ -84,12 +80,12 @@ ${rule('─', 74, 'ocean')}
 function listSources() {
   const rows = SOURCES.map((s) => {
     const key = s.keyEnv ? `${c.yellow}needs ${s.keyEnv}${c.reset}` : `${c.green}no key${c.reset}`;
-    return `  ${CYAN}${pad(s.id, 11)}${c.reset} ${pad(s.name, 24)} ${key}  ${c.dim}${s.blurb}${c.reset}`;
+    return `  ${CYAN}${padStr(s.id, 11)}${c.reset} ${padStr(s.name, 24)} ${key}  ${c.dim}${s.blurb}${c.reset}`;
   });
   return `${banner('grape')}\n${rows.join('\n')}\n`;
 }
 
-const pad = (s, n) => s + ' '.repeat(Math.max(0, n - s.length));
+const padStr = (s, n) => s + ' '.repeat(Math.max(0, n - s.length));
 
 // ─────────────────────────────────────────────────────────────── editor loop
 

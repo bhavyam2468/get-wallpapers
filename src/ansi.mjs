@@ -59,6 +59,11 @@ export const supportsTrueColor = () => {
     ci || process.platform === 'win32';
 };
 
+// Theme accents, resolved once at load.
+export const CYAN = supportsTrueColor() ? esc('38;2;0;198;255m') : c.cyan;
+export const AMBER = supportsTrueColor() ? esc('38;2;255;195;113m') : c.yellow;
+export const GREEN = supportsTrueColor() ? esc('38;2;56;239;125m') : c.green;
+
 const hexToRgb = (hex) => [
   parseInt(hex.slice(1, 3), 16),
   parseInt(hex.slice(3, 5), 16),

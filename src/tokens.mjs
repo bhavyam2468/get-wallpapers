@@ -5,11 +5,8 @@
 // ←/→ move between the ⟨tokens⟩, ↑/↓ cycle their values, typing filters the
 // option list and lets you enter a custom value, ⏎ commits.
 
-import { c, width as sw, supportsTrueColor } from './ansi.mjs';
+import { c, CYAN, AMBER, width as sw } from './ansi.mjs';
 import { SOURCES, byId, FORMATS } from './sources.mjs';
-
-const CYAN = supportsTrueColor() ? '\x1b[38;2;0;198;255m' : c.cyan;
-const AMBER = supportsTrueColor() ? '\x1b[38;2;255;195;113m' : c.yellow;
 
 /** Build the token list for a source, keeping values the user already set. */
 export function buildTokens(sourceId, prev = {}) {

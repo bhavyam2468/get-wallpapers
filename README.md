@@ -13,8 +13,9 @@
 
 **One sentence. Arrow keys. A thousand wallpapers.**
 
-```
-npx --yes github:bhavyam2468/get-wallpapers
+```bash
+curl -fsSL https://raw.githubusercontent.com/bhavyam2468/get-wallpapers/main/install.sh | bash
+wallgrab
 ```
 
 </div>
@@ -72,26 +73,65 @@ Hit `⏎` and it streams them down with a live bar:
 
 ## Install
 
-No build step, no dependencies — Node 18+ is the only requirement.
+Node 18+ is the only requirement. No build step, no dependencies, no npm registry.
 
-**Any OS, straight from GitHub** *(the `npx` one-liner at the top)*
+### Linux & macOS
+
 ```bash
-npx --yes github:bhavyam2468/get-wallpapers
+curl -fsSL https://raw.githubusercontent.com/bhavyam2468/get-wallpapers/main/install.sh | bash
 ```
 
-**Global install**
+Downloads the single-file build, **verifies it actually runs**, installs it to
+`~/.local/bin/wallgrab` and tells you if you need to touch your `PATH`.
+System-wide instead: `PREFIX=/usr/local` (prepend `sudo` if needed).
+
+### Windows (PowerShell)
+
+```powershell
+irm https://raw.githubusercontent.com/bhavyam2468/get-wallpapers/main/install.ps1 | iex
+```
+
+Installs to `%LOCALAPPDATA%\Programs\wallgrab` and adds it to your user `PATH`.
+Reopen the terminal afterwards.
+
+### Just run it, don't install anything
+
+The repo ships a bundled single file (`wallgrab.mjs`, ~55 kB, zero deps):
+
 ```bash
-# Linux / macOS
-npm i -g github:bhavyam2468/get-wallpapers && wallgrab
+# Linux / macOS — one shot, nothing written to disk
+curl -fsSL https://raw.githubusercontent.com/bhavyam2468/get-wallpapers/main/wallgrab.mjs | node - --help
 
 # Windows (PowerShell)
-npm i -g github:bhavyam2468/get-wallpapers; wallgrab
+irm https://raw.githubusercontent.com/bhavyam2468/get-wallpapers/main/wallgrab.mjs -OutFile wallgrab.mjs; node wallgrab.mjs
+```
 
-# Windows (cmd)
+### npm
+
+```bash
+# any OS
 npm i -g github:bhavyam2468/get-wallpapers && wallgrab
 ```
 
-**Clone it** *(guaranteed to work, no registry involved)*
+<details>
+<summary>If you hit <code>EALLOWGIT</code></summary>
+
+```
+npm error code EALLOWGIT
+npm error Fetching packages of type "git" have been disabled
+```
+
+Your npm config forbids git dependencies (`allow-git=false` — common on
+hardened or corporate setups). Either use the `curl` installer above, or lift
+it for one command:
+
+```bash
+npm i -g github:bhavyam2468/get-wallpapers --allow-git=true
+```
+</details>
+
+### From source
+
 ```bash
 # Linux / macOS
 git clone https://github.com/bhavyam2468/get-wallpapers.git
@@ -102,11 +142,8 @@ git clone https://github.com/bhavyam2468/get-wallpapers.git
 cd get-wallpapers; node bin/wallgrab.mjs
 ```
 
-**Bun / Deno**
-```bash
-bunx github:bhavyam2468/get-wallpapers
-deno run -A npm:github:bhavyam2468/get-wallpapers
-```
+The single file is generated from `src/` — rebuild it with
+`node scripts/build-standalone.mjs` after changing anything.
 
 ## The sources
 
@@ -205,6 +242,7 @@ mogrify -format jpg -quality 90 ./wallpapers/*.png
 ## How it works
 
 ```
+wallgrab.mjs          single-file build (~55 kB) — what curl pipes to node
 bin/wallgrab.mjs      shebang shim → src/cli.mjs
 src/cli.mjs           arg parsing, editor loop, orchestration, summary
 src/tokens.mjs        the inline sentence editor (the fun part)
@@ -212,6 +250,9 @@ src/sources.mjs       all eleven providers behind one search() interface
 src/download.mjs      concurrency pool, resume, magic-byte verification
 src/banner.mjs        ANSI-shadow glyphs + gradient painting
 src/ansi.mjs          colour, cursor, truecolour detection
+scripts/build-standalone.mjs   inlines src/ into wallgrab.mjs
+scripts/smoke.mjs              40 checks: npm test
+install.sh / install.ps1       curl-pipe installers
 ```
 
 Nothing is bundled, nothing is compiled. `package.json` has an empty
@@ -254,8 +295,14 @@ What was actually run, not just written:
 | editor token build / cycle / type-filter | ✅ unit-tested |
 | source-specific token rebuild on switch | ✅ unit-tested |
 | `wallhaven`, `nasa`, `openverse`, `artic`, `met` APIs | ✅ confirmed reachable |
-| interactive TUI in a real terminal | ⚠️ not verified in CI |
-| `npx github:…` from a clean machine | ⚠️ not verified — needs the repo public |
+| interactive TUI driven through a real pty | ✅ arrow keys, type-filter, dropdown |
+| invalid source typed + Enter | ✅ inline "did you mean nasa?", stays in editor |
+| bundled `wallgrab.mjs` (single file) | ✅ version, sources, live download |
+| `cat wallgrab.mjs \| node - --version` | ✅ the pipe form works |
+| `install.sh` end to end | ✅ downloads, verifies, installs, runs |
+| symlink `wallgrab` → `wallgrab.mjs` | ✅ Node resolves the realpath |
+| `install.ps1` | ⚠️ not run — no Windows here |
+| `npx github:…` | ⚠️ needs the repo public |
 
 ## License
 
