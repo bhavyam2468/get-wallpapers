@@ -141,6 +141,27 @@ export class SentenceEditor {
 
   cancelTyping() { this.typing = null; this.error = null; this.menuOffset = 0; }
 
+  /**
+   * Validate everything on ⏎. Returns an error string, or null if the
+   * sentence is safe to run. Keeps the user in the editor instead of
+   * bailing out to a failed run.
+   */
+  commitError() {
+    for (const t of this.tokens) {
+      if (t.validate) {
+        const err = t.validate(t.value);
+        if (err) return `${t.key}: ${err}`;
+      }
+      if (t.sourceToken && !SOURCES.some((s) => s.id === t.value)) {
+        const near = SOURCES.filter((s) => s.id.startsWith(String(t.value)[0]));
+        return `unknown source "${t.value}"` +
+          (near.length ? ` — did you mean ${near.map((s) => s.id).join(' / ')}?`
+                       : ` — try ${SOURCES.map((s) => s.id).join(', ')}`);
+      }
+    }
+    return null;
+  }
+
   backspace() {
     if (this.typing === null) return;
     this.typing = this.typing.slice(0, -1);

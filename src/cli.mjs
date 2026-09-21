@@ -125,8 +125,9 @@ async function runEditor(theme) {
       if (s === '\t') { editor.move(1); draw(); return; }
 
       if (s === '\r' || s === '\n') {
-        if (editor.error) { draw(); return; }
         editor.cancelTyping();
+        const err = editor.commitError();
+        if (err) { editor.error = err; draw(); return; }
         cleanup();
         resolve(editor.values);
         return;

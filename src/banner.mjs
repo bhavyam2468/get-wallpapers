@@ -39,7 +39,7 @@ export function banner(theme = 'sunset') {
   const art = supportsTrueColor() ? gradient(rows.join('\n'), stops) : rows.join('\n');
 
   const tagline = gradientRows([
-    '  bulk wallpapers · twelve sources · zero dependencies',
+    '  bulk wallpapers · eleven sources · zero dependencies',
     '  ↑↓ pick a value · ←→ move between them · ⏎ grab',
   ], stops);
 
