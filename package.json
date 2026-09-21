@@ -28,7 +28,7 @@
     "grab": "node bin/wallgrab.mjs",
     "build": "node scripts/build-standalone.mjs",
     "smoke": "node scripts/smoke.mjs",
-    "test": "node scripts/smoke.mjs && node scripts/build-standalone.mjs && node wallgrab.mjs --version"
+    "test": "node scripts/smoke.mjs && node scripts/build-standalone.mjs && node scripts/check-bundle.mjs"
   },
   "keywords": [
     "wallpaper",

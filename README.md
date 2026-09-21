@@ -251,7 +251,8 @@ src/download.mjs      concurrency pool, resume, magic-byte verification
 src/banner.mjs        ANSI-shadow glyphs + gradient painting
 src/ansi.mjs          colour, cursor, truecolour detection
 scripts/build-standalone.mjs   inlines src/ into wallgrab.mjs
-scripts/smoke.mjs              40 checks: npm test
+scripts/smoke.mjs              51 checks against src/
+scripts/check-bundle.mjs       9 checks against the built bundle
 install.sh / install.ps1       curl-pipe installers
 ```
 
@@ -300,6 +301,8 @@ What was actually run, not just written:
 | bundled `wallgrab.mjs` (single file) | ✅ version, sources, live download |
 | `cat wallgrab.mjs \| node - --version` | ✅ the pipe form works |
 | `install.sh` end to end | ✅ downloads, verifies, installs, runs |
+| `render()` for all 11 sources, every editor state | ✅ 51 smoke checks |
+| bundle integration (`scripts/check-bundle.mjs`) | ✅ 9 checks against `wallgrab.mjs` itself |
 | symlink `wallgrab` → `wallgrab.mjs` | ✅ Node resolves the realpath |
 | `install.ps1` | ⚠️ not run — no Windows here |
 | `npx github:…` | ⚠️ needs the repo public |

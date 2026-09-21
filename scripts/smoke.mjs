@@ -62,6 +62,25 @@ const bad = new SentenceEditor('wallhaven');
 bad.jumpTo('not-a-number');
 ok('count rejects non-numeric input', bad.error !== null, bad.error || 'no error raised');
 
+console.log('\n\x1b[1meditor rendering\x1b[0m');
+// render() exercises the alias-heavy layout code; a bundling mistake here
+// throws ReferenceError at runtime rather than at import time.
+for (const s of SOURCES) {
+  const ed = new SentenceEditor(s.id);
+  let err = null;
+  try {
+    const lines = ed.render();
+    if (!Array.isArray(lines) || lines.length < 5) err = 'rendered too few lines';
+    // move across every token and render each state
+    for (let i = 0; i < ed.tokens.length; i++) { ed.move(1); ed.render(); }
+    // and in typing mode, which takes a different layout branch
+    ed.typeChar('a'); ed.render(); ed.cancelTyping();
+    // and with an error showing
+    ed.error = 'test error'; ed.render(); ed.error = null;
+  } catch (e) { err = e.message; }
+  ok(`${s.id} renders every editor state`, err === null, err || '');
+}
+
 console.log('\n\x1b[1mdownload engine\x1b[0m');
 ok('sniffs JPEG', sniff(Buffer.from([0xff, 0xd8, 0xff, 0xe0])) === 'jpg');
 ok('sniffs PNG', sniff(Buffer.from([0x89, 0x50, 0x4e, 0x47])) === 'png');
