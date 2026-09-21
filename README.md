@@ -197,6 +197,15 @@ The single file is generated from `src/` — rebuild it with
 
 **Eight need nothing at all.** Three want a free key:
 
+Easiest — set them from the terminal, masked, stored locally:
+
+```bash
+wallgrab --keys          # walks you through all three, one by one
+```
+
+or, inside the editor, `ctrl+k` pastes a key for the current source. Or the
+classic way (these always win and get remembered):
+
 ```bash
 export UNSPLASH_ACCESS_KEY=xxx    # https://unsplash.com/developers  (50 req/hr)
 export PEXELS_API_KEY=xxx         # https://www.pexels.com/api/      (200 req/hr)
@@ -339,6 +348,7 @@ What was actually run, not just written:
 | banner stays above the editor (redraw regression) | ✅ pty + terminal emulator |
 | folder browser: enter/exit/create/select via pty | ✅ created `newfold` on disk |
 | preferences persist across launches via pty | ✅ `--prefs` + relaunch restore |
+| masked key setup (`--keys` + `ctrl+k`) via pty | ✅ saved, never echoed |
 | `render()` for all 11 sources, every editor state | ✅ 51 smoke checks |
 | bundle integration (`scripts/check-bundle.mjs`) | ✅ 9 checks against `wallgrab.mjs` itself |
 | symlink `wallgrab` → `wallgrab.mjs` | ✅ Node resolves the realpath |

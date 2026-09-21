@@ -64,9 +64,10 @@ export class SentenceEditor {
     this.menuOffset = 0;
     this.error = null;
 
-    // browser / overlay state
+    // browser / overlay / key-input state
     this.mode = 'menu';          // 'menu' | 'browse'
     this.overlay = false;
+    this.keyInput = null;        // { env, value } while pasting an API key
     this.browse = null;          // { path, entries, index, offset }
     this.naming = null;          // new-folder name being typed
     this.recentDirs = [];
@@ -144,7 +145,16 @@ export class SentenceEditor {
 
   cancelTyping() { this.typing = null; this.naming = null; this.error = null; this.menuOffset = 0; }
 
-  _leaveModes() { this.mode = 'menu'; this.browse = null; this.naming = null; this.overlay = false; }
+  _leaveModes() { this.mode = 'menu'; this.browse = null; this.naming = null; this.overlay = false; this.keyInput = null; }
+
+  // ── masked API-key input ──────────────────────────────────────────────
+  startKeyInput(env) {
+    this.keyInput = { env, value: '' };
+    this.typing = null; this.mode = 'menu'; this.overlay = false; this.error = null;
+  }
+  keyChar(ch) { if (this.keyInput) this.keyInput.value += ch; }
+  keyBackspace() { if (this.keyInput) this.keyInput.value = this.keyInput.value.slice(0, -1); }
+  keyCancel() { this.keyInput = null; }
 
   commitError() {
     for (const t of this.tokens) {
@@ -343,13 +353,23 @@ export class SentenceEditor {
       this._overlayLines.map((l) => ' ' + l), null);
   }
 
+  _renderKey() {
+    const k = this.keyInput;
+    const dots = '•'.repeat(Math.min(k.value.length, 28)) + (k.value.length > 28 ? '+' : '');
+    return this._box(`paste ${k.env}`, [
+      ` ${AMBER}${c.bold}${dots || '…'}${c.reset}${c.dim}  (${k.value.length} chars)${c.reset}`,
+      ` ${c.dim}⏎ save locally · esc cancel · masked, never echoed${c.reset}`,
+    ], null);
+  }
+
   render() {
     const lines = [];
     lines.push('');
     lines.push('  ' + this.sentence());
     lines.push('');
 
-    if (this.overlay) lines.push(...this._renderOverlay());
+    if (this.keyInput) lines.push(...this._renderKey());
+    else if (this.overlay) lines.push(...this._renderOverlay());
     else if (this.mode === 'browse' && this.browse) lines.push(...this._renderBrowse());
     else lines.push(...this._renderMenu());
 
@@ -361,7 +381,8 @@ export class SentenceEditor {
     } else {
       lines.push(
         `  ${c.dim}←→${c.reset} move   ${c.dim}↑↓${c.reset} value   ` +
-        `${c.dim}type${c.reset} custom   ${c.dim}⏎${c.reset} grab   ${c.dim}e${c.reset} prefs   ${c.dim}esc${c.reset} quit`,
+        `${c.dim}type${c.reset} custom   ${c.dim}⏎${c.reset} grab   ${c.dim}e${c.reset} prefs   ` +
+        `${c.dim}^K${c.reset} key   ${c.dim}esc${c.reset} quit`,
       );
     }
     return lines;

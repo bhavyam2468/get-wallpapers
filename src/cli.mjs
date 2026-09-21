@@ -24,6 +24,7 @@ function parseArgs(argv) {
     else if (a === '--reset') out.reset = true;
     else if (a === '--no-save') out.noSave = true;
     else if (a === '--prefs') out.prefs = true;
+    else if (a === '--keys') out.keys = true;
     else if (a.startsWith('--')) {
       const key = a.slice(2);
       const next = argv[i + 1];
@@ -53,6 +54,7 @@ ${rule('─', 74, 'ocean')}
     ${CYAN}--jobs${c.reset} <n>           parallel downloads        ${c.dim}(default: 6)${c.reset}
     ${CYAN}--theme${c.reset} <name>       ${themes}
     ${CYAN}--yes${c.reset}, -y            skip the editor, run immediately
+    ${CYAN}--keys${c.reset}              interactive API-key setup (masked, stored locally)
     ${CYAN}--prefs${c.reset}             print stored preferences + keys (masked)
     ${CYAN}--reset${c.reset}             wipe stored preferences and exit
     ${CYAN}--no-save${c.reset}           don't remember this run's preferences
@@ -65,6 +67,7 @@ ${rule('─', 74, 'ocean')}
     ${CYAN}↑ ↓${c.reset}  cycle that word's values
     ${CYAN}type${c.reset} filter the list, or paste your own value
     ${CYAN}⏎${c.reset}    run it        ${CYAN}e${c.reset} preferences overlay   ${CYAN}esc${c.reset} quit
+    ${CYAN}ctrl+k${c.reset} paste an API key for the current source (masked)
 
   ${c.bold}Folder browser${c.reset} ${c.dim}(select the ${CYAN}into${c.reset}${c.dim} token, press ↓)${c.reset}
     ${CYAN}space${c.reset} enter folder   ${CYAN}⌫${c.reset} parent   ${CYAN}⏎${c.reset} select current
@@ -91,6 +94,65 @@ function listSources() {
 }
 
 const padStr = (s, n) => s + ' '.repeat(Math.max(0, n - s.length));
+
+const KEY_ENVS = ['UNSPLASH_ACCESS_KEY', 'PEXELS_API_KEY', 'PIXABAY_API_KEY'];
+
+// Read a line without echoing it (shows • per char). null = cancelled.
+function readSecret(label) {
+  if (!process.stdin.isTTY) {
+    console.log(`  ${c.dim}${label}: not a TTY — set the env var instead${c.reset}`);
+    return Promise.resolve(null);
+  }
+  return new Promise((res) => {
+    process.stdout.write(`  ${label} ${c.dim}(hidden)${c.reset}: `);
+    let val = '';
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    const done = (v) => {
+      process.stdin.removeListener('data', on);
+      process.stdin.setRawMode(false);
+      process.stdin.pause();
+      process.stdout.write('\n');
+      res(v);
+    };
+    const on = (b) => {
+      for (const ch of b.toString()) {
+        if (ch === '\r' || ch === '\n') return done(val);
+        if (ch === '\x03' || ch === '\x1b') return done(null);
+        if (ch === '\x7f' || ch === '\b') {
+          if (val) { val = val.slice(0, -1); process.stdout.write('\b \b'); }
+          continue;
+        }
+        if (ch >= ' ') { val += ch; process.stdout.write('•'); }
+      }
+    };
+    process.stdin.on('data', on);
+  });
+}
+
+async function keysWizard(cfg, theme) {
+  process.stdout.write(banner(theme) + '\n' + rule('─', 74, theme) + '\n\n');
+  console.log(`  ${c.bold}API key setup${c.reset} — stored locally at ${c.dim}${configPath()}${c.reset}`);
+  console.log(`  ${c.dim}env vars always win · enter = keep · esc = skip${c.reset}\n`);
+  cfg.keys = cfg.keys || {};
+
+  for (const env of KEY_ENVS) {
+    const src = SOURCES.find((s) => s.keyEnv === env);
+    const cur = process.env[env] ? `${c.green}(env)${c.reset}`
+      : cfg.keys[env] ? `${c.green}(stored ${mask(cfg.keys[env])})${c.reset}` : `${c.dim}(not set)${c.reset}`;
+    console.log(`  ${CYAN}${env}${c.reset}  ${c.dim}${src?.name || ''}${c.reset}  ${cur}`);
+    console.log(`    ${c.dim}${src?.keyHint || ''}${c.reset}`);
+    const v = await readSecret('   paste new key');
+    if (v === null) { console.log(`    ${c.dim}skipped${c.reset}\n`); continue; }
+    if (v === '') { console.log(`    ${c.dim}kept${c.reset}\n`); continue; }
+    cfg.keys[env] = v.trim();
+    console.log(`    ${c.green}✓ saved${c.reset}\n`);
+  }
+
+  await saveConfig({ values: cfg.values || {}, keys: cfg.keys, recentDirs: cfg.recentDirs || [], theme }).catch(() => {});
+  console.log(`  ${c.green}✓${c.reset} done — now run ${CYAN}wallgrab${c.reset} and pick ${SOURCES.filter((s) => s.keyEnv).map((s) => s.id).join(' / ')}\n`);
+  return 0;
+}
 
 // ─────────────────────────────────────────────────────────────── editor loop
 
@@ -127,6 +189,32 @@ async function runEditor(theme, cfg, persist) {
 
     const handle = async (s) => {
       const t = editor.token;
+
+      // masked key input captures everything while active
+      if (editor.keyInput) {
+        if (s === '\r' || s === '\n') {
+          const { env, value } = editor.keyInput;
+          editor.keyCancel();
+          const v = value.trim();
+          if (v) {
+            cfg.keys = { ...cfg.keys, [env]: v };
+            await saveConfig({ values: editor.values, keys: cfg.keys, recentDirs: editor.recentDirs, theme }).catch(() => {});
+          }
+          return;
+        }
+        if (s === '\x1b') { editor.keyCancel(); return; }
+        if (s === '\x7f' || s === '\b') { editor.keyBackspace(); return; }
+        if (s === '\x15') { editor.keyInput.value = ''; return; }
+        for (const ch of s) if (ch >= ' ' && ch.charCodeAt(0) < 127) editor.keyChar(ch);
+        return;
+      }
+
+      if (s === '\x0b') {                                                    // ctrl+k → key for current source
+        const src = byId(editor.values.source);
+        if (src?.keyEnv) editor.startKeyInput(src.keyEnv);
+        else editor.error = 'current source needs no key — try unsplash / pexels / pixabay, or `wallgrab --keys`';
+        return;
+      }
 
       if (s === '\x03') return finish(null);                                   // ctrl+c
       if (s === '\x1b' && s.length === 1) {                                    // esc
@@ -213,6 +301,8 @@ async function resolveKey(src, cfg, wantSave) {
   return {
     ok: false,
     msg: `${src.name} needs a free API key.\n` +
+         `    ${CYAN}wallgrab --keys${c.reset}          set it interactively (masked, stored locally)\n` +
+         `    ${CYAN}ctrl+k${c.reset} in the editor     set it for the current source\n` +
          `    ${AMBER}export ${src.keyEnv}=your_key${c.reset}   ${c.dim}(it will be remembered)${c.reset}\n` +
          `    ${c.dim}${src.keyHint}${c.reset}\n\n` +
          `    Or pick a no-key source: ${SOURCES.filter((s) => !s.keyEnv).map((s) => s.id).join(', ')}`,
@@ -300,6 +390,7 @@ async function main() {
   if (args.help) { console.log(help()); return 0; }
   if (args.version) { console.log(`wallgrab ${VERSION}`); return 0; }
   if (args.sources) { console.log(listSources()); return 0; }
+  if (args.keys) { return keysWizard(cfg, theme); }
   if (args.prefs) {
     console.log(`  ${c.bold}stored at${c.reset} ${configPath()}\n`);
     console.log(`  ${c.bold}values${c.reset}`);
