@@ -40,7 +40,7 @@ cycle their values with `↑`/`↓`, or just start typing to filter and enter yo
 
 ────────────────────────────────────────────────────────────────────────────
 
-  download  100  minimal  wallpapers from  wallhaven  as  any  into  ./wallpapers
+  download  100  minimal  wallpapers from  wallhaven  as  any  into  ~/Downloads/wallgrab
                                               ▲
   ┌ choose a source ─────────────────────────────────┐
   │   wallhaven                                      │
@@ -53,7 +53,41 @@ cycle their values with `↑`/`↓`, or just start typing to filter and enter yo
   │   · · · 11 options                               │
   └──────────────────────────────────────────────────┘
 
-  ←→ move   ↑↓ value   type custom   ⏎ grab   esc quit
+  ←→ move   ↑↓ value   type custom   ⏎ grab   e prefs   esc quit
+```
+
+### Folder browser
+
+Select the **into** token and press `↓` — the dropdown becomes a live folder
+browser:
+
+```
+  ┌ in ~/Downloads ────────────────────────────────┐
+  │   anime/                                       │
+  │ › minimal/                                     │
+  │   rice/                                        │
+  └────────────────────────────────────────────────┘
+  space enter  ⌫ up  ⏎ select  n new  type paste path  esc close
+```
+
+`space` enters, `⌫` goes up, `⏎` takes the current folder, `n` names a new one,
+and you can still just type/paste a full path — the browser is additive.
+The default lands in your OS Downloads dir (`~/Downloads/wallgrab`).
+
+### Preferences
+
+First run remembers everything: count · query · source · folder · per-source
+options · theme, plus any API keys you had in the environment (stored locally,
+masked when shown). The next launch starts from your last setup. Env vars always
+win over stored keys.
+
+```bash
+wallgrab --prefs     # show what's remembered (keys masked)
+wallgrab --reset     # wipe it
+wallgrab --no-save   # run once without remembering
+```
+
+Inside the editor, `e` opens the same summary as an overlay.
 ```
 
 Hit `⏎` and it streams them down with a live bar:
@@ -245,7 +279,8 @@ mogrify -format jpg -quality 90 ./wallpapers/*.png
 wallgrab.mjs          single-file build (~55 kB) — what curl pipes to node
 bin/wallgrab.mjs      shebang shim → src/cli.mjs
 src/cli.mjs           arg parsing, editor loop, orchestration, summary
-src/tokens.mjs        the inline sentence editor (the fun part)
+src/tokens.mjs        the inline sentence editor + folder browser
+src/config.mjs        remembered preferences & keys
 src/sources.mjs       all eleven providers behind one search() interface
 src/download.mjs      concurrency pool, resume, magic-byte verification
 src/banner.mjs        ANSI-shadow glyphs + gradient painting
@@ -301,6 +336,9 @@ What was actually run, not just written:
 | bundled `wallgrab.mjs` (single file) | ✅ version, sources, live download |
 | `cat wallgrab.mjs \| node - --version` | ✅ the pipe form works |
 | `install.sh` end to end | ✅ downloads, verifies, installs, runs |
+| banner stays above the editor (redraw regression) | ✅ pty + terminal emulator |
+| folder browser: enter/exit/create/select via pty | ✅ created `newfold` on disk |
+| preferences persist across launches via pty | ✅ `--prefs` + relaunch restore |
 | `render()` for all 11 sources, every editor state | ✅ 51 smoke checks |
 | bundle integration (`scripts/check-bundle.mjs`) | ✅ 9 checks against `wallgrab.mjs` itself |
 | symlink `wallgrab` → `wallgrab.mjs` | ✅ Node resolves the realpath |

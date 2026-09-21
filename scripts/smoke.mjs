@@ -6,7 +6,7 @@ import { SOURCES, byId } from '../src/sources.mjs';
 import { SentenceEditor } from '../src/tokens.mjs';
 import { sniff, downloadAll } from '../src/download.mjs';
 import { banner } from '../src/banner.mjs';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -59,8 +59,68 @@ ok('switching to github adds repo/filter/pick',
   ['repo', 'filter', 'pick'].every((k) => sw.tokens.some((t) => t.key === k)));
 
 const bad = new SentenceEditor('wallhaven');
-bad.jumpTo('not-a-number');
+bad.index = bad.tokens.findIndex((t) => t.key === 'count');
+bad._apply('not-a-number');
 ok('count rejects non-numeric input', bad.error !== null, bad.error || 'no error raised');
+ok('dir defaults to ~/Downloads/wallgrab',
+  new SentenceEditor('wallhaven').tokens.find((t) => t.key === 'dir').value.endsWith('Downloads/wallgrab'));
+
+// ── folder browser (async) ────────────────────────────────────────────
+console.log('\n\x1b[1mfolder browser\x1b[0m');
+{
+  const base = await mkdtemp(join(tmpdir(), 'wg-browse-'));
+  await mkdir(join(base, 'anime'), { recursive: true });
+  await mkdir(join(base, 'minimal'), { recursive: true });
+  await mkdir(join(base, 'nested', 'deep'), { recursive: true });
+  const b = new SentenceEditor('wallhaven', { dir: base });
+  b.index = b.tokens.findIndex((t) => t.key === 'dir');
+
+  await b.openBrowse();
+  ok('opens at the current dir', b.mode === 'browse' && b.browse.path === base, b.browse?.path);
+  ok('lists folders only', b.browse.entries.join(',') === 'anime,minimal,nested', b.browse.entries.join(','));
+
+  b.browseMove(1);                       // → minimal
+  await b.browseEnter();                 // space
+  ok('space descends', b.browse.path === join(base, 'minimal'));
+  await b.browseBack();                  // ⌫
+  ok('backspace ascends', b.browse.path === base);
+
+  b.browse.index = b.browse.entries.indexOf('nested');
+  await b.browseEnter();                 // space → nested
+  ok('nested descent works', b.browse.path === join(base, 'nested'), b.browse.path);
+  b.browse.index = 0;
+  await b.browseEnter();                 // space → nested/deep
+  ok('deep descent works', b.browse.path === join(base, 'nested', 'deep'), b.browse.path);
+
+  b.naming = 'brand-new';
+  await b.browseNew();
+  ok('n + name + enter creates a folder', b.browse.entries.includes('brand-new'), b.browse.entries.join(','));
+
+  b.browseSelect();
+  ok('enter selects the folder as dir',
+    b.token.value === join(base, 'nested', 'deep') && b.mode === 'menu', b.token.value);
+
+  // typing a path still works (paste mode)
+  b.typeChar('/'); b.typeChar('t'); b.typeChar('m'); b.typeChar('p');
+  ok('typing pastes a raw path', b.token.value.startsWith('/tmp'), b.token.value);
+  await rm(base, { recursive: true, force: true });
+}
+
+// ── config persistence ────────────────────────────────────────────────
+console.log('\n\x1b[1mconfig persistence\x1b[0m');
+{
+  const tmpCfg = await mkdtemp(join(tmpdir(), 'wg-cfg-'));
+  const oldXdg = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = tmpCfg;
+  const cfgMod = await import('../src/config.mjs');
+  ok('config path honors XDG_CONFIG_HOME', cfgMod.configPath().startsWith(tmpCfg), cfgMod.configPath());
+  await cfgMod.saveConfig({ values: { count: '42', source: 'nasa' }, keys: { PEXELS_API_KEY: 'pk-1234567890' } });
+  const loaded = await cfgMod.loadConfig();
+  ok('round-trips values', loaded?.values?.count === '42' && loaded?.values?.source === 'nasa');
+  ok('masks a stored key', cfgMod.mask('pk-1234567890').startsWith('pk-123') && cfgMod.mask('pk-1234567890').includes('•'));
+  await rm(tmpCfg, { recursive: true, force: true });
+  if (oldXdg === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = oldXdg;
+}
 
 console.log('\n\x1b[1meditor rendering\x1b[0m');
 // render() exercises the alias-heavy layout code; a bundling mistake here

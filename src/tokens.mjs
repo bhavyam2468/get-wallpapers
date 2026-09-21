@@ -1,12 +1,24 @@
 // The inline editable command sentence.
 //
-//   download ⟨100⟩ ⟨minimal⟩ wallpapers from ⟨wallhaven⟩ as ⟨jpg⟩ into ⟨./wallpapers⟩
+//   download ⟨100⟩ ⟨minimal⟩ wallpapers from ⟨wallhaven⟩ as ⟨any⟩ into ⟨~/Downloads/wallgrab⟩
 //
-// ←/→ move between the ⟨tokens⟩, ↑/↓ cycle their values, typing filters the
-// option list and lets you enter a custom value, ⏎ commits.
+// ←/→ move between the ⟨tokens⟩ · ↑/↓ cycle values · type to filter/custom · ⏎ runs.
+//
+// The dir token additionally opens a folder browser (↓):
+//   space enter folder · ⌫ parent · ⏎ select current · n new folder · ←/esc close
+// and `e` toggles the config overlay.
 
 import { c, CYAN, AMBER, width as sw } from './ansi.mjs';
 import { SOURCES, byId, FORMATS } from './sources.mjs';
+import { defaultDir, downloadsDir, mask, configPath } from './config.mjs';
+import { readdir, mkdir } from 'node:fs/promises';
+import { existsSync, statSync } from 'node:fs';
+import { join, resolve, dirname, isAbsolute } from 'node:path';
+import { homedir } from 'node:os';
+
+export const MENU_H = 8;
+
+const DIR_OPTIONS = () => [defaultDir(), downloadsDir(), join(homedir(), 'Pictures')];
 
 /** Build the token list for a source, keeping values the user already set. */
 export function buildTokens(sourceId, prev = {}) {
@@ -15,7 +27,7 @@ export function buildTokens(sourceId, prev = {}) {
     {
       key: 'count', label: 'download', value: prev.count ?? String(src?.defaults.count ?? 100),
       options: ['10', '25', '50', '100', '250', '500', '1000'],
-      suffix: '', validate: (v) => (/^\d+$/.test(v) && +v > 0) ? null : 'needs a whole number',
+      validate: (v) => (/^\d+$/.test(v) && +v > 0) ? null : 'needs a whole number',
     },
     {
       key: 'query', label: '', value: prev.query ?? src?.defaults.query ?? 'minimal',
@@ -24,88 +36,78 @@ export function buildTokens(sourceId, prev = {}) {
       freeform: true, hint: 'search terms',
     },
     {
-      key: 'source', label: 'wallpapers from',
-      value: sourceId,
-      options: null, // filled below from the registry
-      sourceToken: true,
+      key: 'source', label: 'wallpapers from', value: sourceId,
+      options: null, sourceToken: true,
     },
     {
       key: 'format', label: 'as', value: prev.format ?? 'any',
       options: FORMATS, hint: 'kept files must really be this format',
     },
     {
-      key: 'dir', label: 'into', value: prev.dir ?? './wallpapers',
-      freeform: true, hint: 'output folder',
+      key: 'dir', label: 'into', value: prev.dir ?? defaultDir(),
+      freeform: true, dirToken: true,
+      hint: '↓ browse · type or paste a path',
     },
   ];
 
   for (const extra of src?.extra || []) {
-    tokens.push({
-      ...extra,
-      value: prev[extra.key] ?? extra.value,
-      label: extra.label,
-    });
+    tokens.push({ ...extra, value: prev[extra.key] ?? extra.value, label: extra.label });
   }
   return tokens;
 }
 
-/**
- * Stateful editor. `render()` returns the exact lines to draw; the caller owns
- * the screen and just replays them.
- */
 export class SentenceEditor {
   constructor(sourceId, initial = {}) {
     this.tokens = buildTokens(sourceId, initial);
     this.index = 0;
-    this.typing = null; // null, or the partial string being typed
+    this.typing = null;
     this.menuOffset = 0;
-    this.lastLines = 0;
     this.error = null;
+
+    // browser / overlay state
+    this.mode = 'menu';          // 'menu' | 'browse'
+    this.overlay = false;
+    this.browse = null;          // { path, entries, index, offset }
+    this.naming = null;          // new-folder name being typed
+    this.recentDirs = [];
   }
 
   get token() { return this.tokens[this.index]; }
   get values() { return Object.fromEntries(this.tokens.map((t) => [t.key, t.value])); }
 
-  /** Options for the selected token, honouring the active type-filter. */
+  // ── options / validation ───────────────────────────────────────────────
+
   options() {
     const t = this.token;
-    if (t.sourceToken) {
-      return SOURCES.map((s) => s.id);
-    }
+    if (t.sourceToken) return SOURCES.map((s) => s.id);
+    if (t.dirToken && this.mode !== 'browse') return DIR_OPTIONS();
     let opts = t.options ? [...t.options] : [];
     if (this.typing) {
       const q = this.typing.toLowerCase();
-      const hits = opts.filter((o) => o.toLowerCase().includes(q));
-      opts = hits;
-      if (t.freeform !== false && !opts.some((o) => o === this.typing)) {
-        opts = [this.typing, ...opts];
-      }
+      opts = opts.filter((o) => o.toLowerCase().includes(q));
+      if (t.freeform !== false && !opts.includes(this.typing)) opts = [this.typing, ...opts];
     }
     return opts;
   }
 
+  // ── core token ops (unchanged behaviour) ──────────────────────────────
+
   move(delta) {
     const n = this.tokens.length;
     this.index = (this.index + delta + n) % n;
-    this.typing = null; this.menuOffset = 0; this.error = null;
-    // switching source rebuilds the extra tokens
+    this._leaveModes();
     if (this.token.sourceToken) this._noteSource = true;
   }
 
   cycle(delta) {
+    if (this.mode === 'browse') return this.browseMove(delta);
     const opts = this.options();
     if (!opts.length) return;
     const cur = opts.indexOf(this.typing ?? this.token.value);
-    const next = cur === -1
-      ? (delta > 0 ? 0 : opts.length - 1)
+    const next = cur === -1 ? (delta > 0 ? 0 : opts.length - 1)
       : (cur + delta + opts.length) % opts.length;
-    this.menuOffset = Math.max(0, next - 5);
+    this.menuOffset = Math.max(0, next - (MENU_H - 2));
     this._apply(opts[next]);
-  }
-
-  jumpTo(value) {
-    this.menuOffset = 0;
-    this._apply(value);
   }
 
   _apply(value) {
@@ -124,25 +126,26 @@ export class SentenceEditor {
   }
 
   typeChar(ch) {
-    // First keystroke starts from an empty buffer, not from the old value.
+    if (this.naming !== null) { this.naming += ch; return; }
+    if (this.mode === 'browse') this._leaveModes(); // typing = paste-a-path mode
     this.typing = (this.typing ?? '') + ch;
     this.menuOffset = 0;
     this._apply(this.typing);
   }
 
-  clearTyping() {
-    this.typing = '';
+  backspace() {
+    if (this.naming !== null) { this.naming = this.naming.slice(0, -1); return; }
+    if (this.mode === 'browse') return this.browseBack();
+    if (this.typing === null) return;
+    this.typing = this.typing.slice(0, -1);
     this.menuOffset = 0;
-    if (this.token.freeform) this._apply('');
+    if (this.token.freeform) this._apply(this.typing);
   }
 
-  cancelTyping() { this.typing = null; this.error = null; this.menuOffset = 0; }
+  cancelTyping() { this.typing = null; this.naming = null; this.error = null; this.menuOffset = 0; }
 
-  /**
-   * Validate everything on ⏎. Returns an error string, or null if the
-   * sentence is safe to run. Keeps the user in the editor instead of
-   * bailing out to a failed run.
-   */
+  _leaveModes() { this.mode = 'menu'; this.browse = null; this.naming = null; this.overlay = false; }
+
   commitError() {
     for (const t of this.tokens) {
       if (t.validate) {
@@ -159,16 +162,107 @@ export class SentenceEditor {
     return null;
   }
 
-  backspace() {
-    if (this.typing === null) return;
-    this.typing = this.typing.slice(0, -1);
-    this.menuOffset = 0;
-    if (this.token.freeform) this._apply(this.typing);
+  // ── folder browser ────────────────────────────────────────────────────
+
+  async openBrowse(startAt) {
+    let base = startAt ?? this.token.value;
+    base = resolve(base.startsWith('~') ? join(homedir(), base.slice(1)) : base);
+    if (!existsSync(base) || !this._isDir(base)) base = dirname(base);
+    if (!existsSync(base) || !this._isDir(base)) base = downloadsDir();
+    await this._loadBrowse(base);
+    this.mode = 'browse';
+    this.typing = null;
+    this.error = null;
   }
 
-  // ── rendering ──────────────────────────────────────────────────────────
+  _isDir(p) { try { return statSync(p).isDirectory(); } catch { return false; } }
 
-  /** The sentence, with the active token highlighted. */
+  async _loadBrowse(path) {
+    let entries = [];
+    try {
+      const list = await readdir(path, { withFileTypes: true });
+      entries = list
+        .filter((e) => (e.isDirectory() || e.isSymbolicLink()) && !e.name.startsWith('.'))
+        .map((e) => e.name)
+        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+    } catch (e) {
+      this.error = `can't read ${path}: ${e.code || e.message}`;
+    }
+    this.browse = { path, entries, index: 0, offset: 0 };
+    this.naming = null;
+  }
+
+  browseMove(delta) {
+    const b = this.browse;
+    if (!b || !b.entries.length) return;
+    b.index = (b.index + delta + b.entries.length) % b.entries.length;
+    b.offset = Math.min(Math.max(0, b.index - (MENU_H - 2)), Math.max(0, b.entries.length - MENU_H));
+  }
+
+  async browseEnter() { // space: descend into the highlighted folder
+    const b = this.browse;
+    if (!b?.entries.length) return;
+    await this._loadBrowse(join(b.path, b.entries[b.index]));
+  }
+
+  async browseBack() { // ⌫: up one level
+    const b = this.browse;
+    if (!b) return;
+    const parent = dirname(b.path);
+    if (parent === b.path) return;
+    const old = b.path.split(/[\\/]/).pop();
+    await this._loadBrowse(parent);
+    const i = this.browse.entries.indexOf(old);
+    if (i >= 0) { this.browse.index = i; this.browse.offset = Math.max(0, i - (MENU_H - 2)); }
+  }
+
+  async browseNew() { // n then type a name, ⏎ creates it
+    if (this.naming === null) { this.naming = ''; return; }
+    const name = this.naming.trim();
+    this.naming = null;
+    if (!name) return;
+    try {
+      await mkdir(join(this.browse.path, name), { recursive: false });
+      await this._loadBrowse(this.browse.path);
+      const i = this.browse.entries.indexOf(name);
+      if (i >= 0) this.browse.index = i;
+    } catch (e) {
+      this.error = e.code === 'EEXIST' ? `folder "${name}" already exists` : `${e.code || e.message}`;
+    }
+  }
+
+  browseSelect() { // ⏎ in browse: take the current folder as the dir value
+    if (!this.browse) return;
+    this.token.value = this.browse.path;
+    this.recentDirs = [this.browse.path, ...this.recentDirs.filter((d) => d !== this.browse.path)].slice(0, 5);
+    this._leaveModes();
+  }
+
+  // ── overlay ───────────────────────────────────────────────────────────
+
+  toggleOverlay(cfg) {
+    this.overlay = !this.overlay;
+    if (this.overlay) {
+      const v = cfg?.values || {};
+      const keys = cfg?.keys || {};
+      this._overlayLines = [
+        `${c.bold}saved preferences${c.reset}  ${c.dim}${configPath()}${c.reset}`,
+        '',
+        ...Object.entries(v).slice(0, 9).map(
+          ([k, val]) => `  ${CYAN}${String(k).padEnd(10)}${c.reset} ${String(val)}`,
+        ),
+        '',
+        `${c.bold}keys${c.reset} ${c.dim}(optional, stored locally)${c.reset}`,
+        ...['UNSPLASH_ACCESS_KEY', 'PEXELS_API_KEY', 'PIXABAY_API_KEY'].map((k) =>
+          `  ${k.padEnd(20)} ${keys[k] ? c.green + mask(keys[k]) + c.reset : c.dim + 'not set' + c.reset}`),
+        '',
+        `${c.dim}env vars always win · --reset clears · --no-save skips${c.reset}`,
+      ];
+    }
+  }
+
+  // ── rendering ─────────────────────────────────────────────────────────
+
   sentence() {
     let out = `${AMBER}${c.bold}download${c.reset} `;
     for (let i = 0; i < this.tokens.length; i++) {
@@ -184,52 +278,103 @@ export class SentenceEditor {
     return out;
   }
 
-  render(menuHeight = 8) {
+  _box(title, rows, foot) {
+    const W = 60;
+    const lines = [];
+    lines.push(`  ${c.dim}┌ ${c.bold}${title}${c.reset}${c.dim} ${'─'.repeat(Math.max(2, W - sw(title)))}┐${c.reset}`);
+    for (const r of rows) {
+      lines.push(`  ${c.dim}│${c.reset}${padRow(r, W)}${c.dim}│${c.reset}`);
+    }
+    lines.push(`  ${c.dim}└${'─'.repeat(W)}┘${c.reset}`);
+    if (foot) lines.push(foot);
+    return lines;
+  }
+
+  _renderMenu() {
+    const opts = this.options();
+    const t = this.token;
+    const title = this.typing !== null
+      ? `type to filter — ⏎ to accept "${this.typing}"`
+      : (t.hint || `choose a ${t.key}`);
+
+    const rows = [];
+    if (!opts.length) {
+      rows.push(` ${c.italic}${c.dim}no match — keep typing, ⏎ uses your text${c.reset}`);
+    } else {
+      for (const o of opts.slice(this.menuOffset, this.menuOffset + MENU_H)) {
+        const sel = o === (this.typing ?? t.value);
+        rows.push(sel
+          ? ` ${c.bold}${CYAN}› ${o}${c.reset}`
+          : ` ${c.dim}  ${o}${c.reset}`);
+      }
+      if (opts.length > MENU_H) {
+        rows.push(` ${c.dim}· · · ${opts.length} options${c.reset}`);
+      }
+    }
+    return this._box(title, rows, null);
+  }
+
+  _renderBrowse() {
+    const b = this.browse;
+    const title = `in ${shortPath(b.path)}`;
+    const rows = [];
+    if (this.naming !== null) {
+      rows.push(` ${AMBER}${c.bold}new folder: ${this.naming}▌${c.reset}  ${c.dim}⏎ create · esc cancel${c.reset}`);
+    } else if (!b.entries.length) {
+      rows.push(` ${c.italic}${c.dim}no folders here — n to create one, ⏎ to use this folder${c.reset}`);
+    } else {
+      for (const name of b.entries.slice(b.offset, b.offset + MENU_H)) {
+        const sel = name === b.entries[b.index];
+        rows.push(sel
+          ? ` ${c.bold}${CYAN}› ${name}/${c.reset}`
+          : ` ${c.dim}  ${name}/${c.reset}`);
+      }
+      if (b.entries.length > MENU_H) {
+        rows.push(` ${c.dim}· · · ${b.entries.length} folders${c.reset}`);
+      }
+    }
+    const foot = `  ${c.dim}space${c.reset} enter  ${c.dim}⌫${c.reset} up  ${c.dim}⏎${c.reset} select  ` +
+      `${c.dim}n${c.reset} new  ${c.dim}type${c.reset} paste path  ${c.dim}esc${c.reset} close`;
+    return this._box(title, rows, foot);
+  }
+
+  _renderOverlay() {
+    return this._box('preferences · e or esc to close',
+      this._overlayLines.map((l) => ' ' + l), null);
+  }
+
+  render() {
     const lines = [];
     lines.push('');
     lines.push('  ' + this.sentence());
     lines.push('');
 
-    const opts = this.options();
-    const t = this.token;
+    if (this.overlay) lines.push(...this._renderOverlay());
+    else if (this.mode === 'browse' && this.browse) lines.push(...this._renderBrowse());
+    else lines.push(...this._renderMenu());
 
-    const title = this.typing !== null
-      ? `type to filter — ⏎ to accept "${this.typing}"`
-      : (t.hint || `choose a ${t.key}`);
-
-    lines.push(`  ${c.dim}┌ ${c.bold}${title}${c.reset}${c.dim} ${'─'.repeat(Math.max(2, 46 - sw(title)))}┐${c.reset}`);
-
-    if (!opts.length) {
-      lines.push(`  ${c.dim}│${c.reset} ${c.italic}${c.dim}no match — keep typing, ⏎ uses your text${c.reset}${' '.repeat(12)}${c.dim}│${c.reset}`);
-    } else {
-      const view = opts.slice(this.menuOffset, this.menuOffset + menuHeight);
-      for (const o of view) {
-        const sel = o === (this.typing ?? t.value);
-        const row = sel
-          ? `${c.bold}${CYAN}  › ${o}${c.reset}`
-          : `${c.dim}    ${o}${c.reset}`;
-        lines.push(`  ${c.dim}│${c.reset}${padEnd(row, 47)}${c.dim}│${c.reset}`);
-      }
-      if (opts.length > menuHeight) {
-        lines.push(`  ${c.dim}│    · · · ${opts.length} options${' '.repeat(Math.max(0, 30))}│${c.reset}`);
-      }
-    }
-    lines.push(`  ${c.dim}└${'─'.repeat(48)}┘${c.reset}`);
     lines.push('');
-
     if (this.error) {
       lines.push(`  ${c.bgRed}${c.bold}${c.white} ✖ ${this.error} ${c.reset}`);
+    } else if (this.overlay) {
+      lines.push(`  ${c.dim}e / esc${c.reset} close overlay`);
     } else {
       lines.push(
         `  ${c.dim}←→${c.reset} move   ${c.dim}↑↓${c.reset} value   ` +
-        `${c.dim}type${c.reset} custom   ${c.dim}⏎${c.reset} grab   ${c.dim}esc${c.reset} quit`,
+        `${c.dim}type${c.reset} custom   ${c.dim}⏎${c.reset} grab   ${c.dim}e${c.reset} prefs   ${c.dim}esc${c.reset} quit`,
       );
     }
     return lines;
   }
 }
 
-function padEnd(s, n) {
+function padRow(s, n) {
   const w = sw(s);
-  return s + ' '.repeat(Math.max(0, n - w));
+  return s + ' '.repeat(Math.max(1, n - w));
+}
+
+function shortPath(p) {
+  const home = homedir();
+  const s = p.startsWith(home) ? '~' + p.slice(home.length) : p;
+  return s.length > 44 ? '…' + s.slice(-43) : s;
 }

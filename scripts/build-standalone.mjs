@@ -16,9 +16,10 @@ import { fileURLToPath } from 'node:url';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 // Dependency order — ansi and sources first, cli last (it self-executes).
-const ORDER = ['ansi', 'sources', 'download', 'banner', 'tokens', 'cli'];
+const ORDER = ['ansi', 'sources', 'download', 'banner', 'config', 'tokens', 'cli'];
 
-const builtins = new Map();      // 'node:path' -> 'join'
+// 'node:path' -> { named:Set<string>, defaults:Set<string> }
+const builtins = new Map();
 const aliasesFor = new Map();    // 'ansi' -> [{ alias: 'sw', original: 'width' }]
 
 // ── pass 1: read everything, resolve imports ───────────────────────────
@@ -29,17 +30,18 @@ for (const name of ORDER) {
   sourcesText.set(name, await readFile(join(root, 'src', `${name}.mjs`), 'utf8'));
 }
 
+function recordBuiltin(mod, spec) {
+  if (!builtins.has(mod)) builtins.set(mod, { named: new Set(), defaults: new Set() });
+  const e = builtins.get(mod);
+  const m = spec.match(/^\{([^}]+)\}$/);
+  if (m) m[1].split(',').map((s) => s.trim()).filter(Boolean).forEach((n) => e.named.add(n));
+  else e.defaults.add(spec.trim());
+}
+
 for (const [name, src] of sourcesText) {
   for (const line of src.split('\n')) {
     const bi = line.match(/^\s*import\s+(.+?)\s+from\s+'(node:[^']+)';?\s*$/);
-    if (bi) {
-      const [, spec, mod] = bi;
-      if (!builtins.has(mod)) builtins.set(mod, spec);
-      else if (builtins.get(mod) !== spec) {
-        throw new Error(`conflicting default import for ${mod}: "${builtins.get(mod)}" vs "${spec}"`);
-      }
-      continue;
-    }
+    if (bi) { recordBuiltin(bi[2], bi[1]); continue; }
     const li = line.match(/^\s*import\s+\{([^}]+)\}\s+from\s+'\.\/([\w.-]+)\.mjs';?\s*$/);
     if (li) {
       const [, names, from] = li;
@@ -91,8 +93,19 @@ const header = [
   '//',
 ].join('\n');
 
+// Validate default-import collisions (named ones merge freely).
+for (const [mod, e] of builtins) {
+  if (e.defaults.size > 1) {
+    throw new Error(`conflicting default import for ${mod}: ${[...e.defaults].join(' vs ')}`);
+  }
+}
 const imports = [...builtins]
-  .map(([mod, spec]) => `import ${spec} from '${mod}';`)
+  .map(([mod, e]) => {
+    const parts = [];
+    if (e.defaults.size) parts.push([...e.defaults][0]);
+    if (e.named.size) parts.push(`{ ${[...e.named].join(', ')} }`);
+    return `import ${parts.join(', ')} from '${mod}';`;
+  })
   .join('\n');
 
 const body = chunks.join('\n');
