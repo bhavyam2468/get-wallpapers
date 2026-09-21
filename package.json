@@ -1,0 +1,64 @@
+{
+  "name": "wallgrab",
+  "version": "1.0.0",
+  "description": "Bulk-download wallpapers from 12 sources through one gorgeous terminal UI. No API keys for the good ones.",
+  "type": "module",
+  "bin": {
+    "wallgrab": "./bin/wallgrab.mjs"
+  },
+  "main": "./src/cli.mjs",
+  "exports": {
+    ".": "./src/cli.mjs",
+    "./sources": "./src/sources.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node bin/wallgrab.mjs",
+    "grab": "node bin/wallgrab.mjs",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "keywords": [
+    "wallpaper",
+    "wallpapers",
+    "cli",
+    "tui",
+    "terminal",
+    "minimal",
+    "abstract",
+    "4k",
+    "bulk",
+    "download",
+    "wallhaven",
+    "unsplash",
+    "nasa",
+    "openverse",
+    "reddit",
+    "desktop",
+    "backgrounds"
+  ],
+  "author": "bhavyam2468",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bhavyam2468/get-wallpapers.git"
+  },
+  "homepage": "https://github.com/bhavyam2468/get-wallpapers#readme",
+  "bugs": {
+    "url": "https://github.com/bhavyam2468/get-wallpapers/issues"
+  },
+  "dependencies": {},
+  "devDependencies": {},
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ]
+}
